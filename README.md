@@ -139,9 +139,9 @@ Will do measurements each fifth minute.
 
 ### 3D printed case
 
-(Waiting for the Printer! -- This time I think I got it right :-)
-Nothing that is really needed, but looks nice.
+![Box](images/openscad.png)
 
+Nothing that is really needed, but looks nice.
 
 ### Software quality
 

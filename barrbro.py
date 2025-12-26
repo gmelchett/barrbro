@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import argparse
+import ipaddress
 import json
 import os
 import sys
@@ -11,7 +13,7 @@ from smbus2 import SMBus, i2c_msg
 import paho.mqtt.client as mqtt
 
 
-TARGET_BUS_NAME = "CH341 I2C USB bus 001 device 009"
+TARGET_BUS_NAME = "CH341 I2C USB bus"
 
 AHT20_ADDR = 0x38
 BMP280_ADDR = 0x77
@@ -26,7 +28,7 @@ def find_i2c_bus():
         try:
             with open(name_file, "r") as f:
                 name = f.read().strip()
-            if name == TARGET_BUS_NAME:
+            if TARGET_BUS_NAME in name:
                 return int(entry.split("-")[1])
         except IOError:
             pass
@@ -120,7 +122,10 @@ def read_aht20(bus):
 
 def bmp280_read_calibration(bus):
     calib = bus.read_i2c_block_data(BMP280_ADDR, 0x88, 24)
-    def u16(i): return calib[i] | (calib[i+1] << 8)
+
+    def u16(i):
+        return calib[i] | (calib[i + 1] << 8)
+
     def s16(i):
         v = u16(i)
         return v - 65536 if v & 0x8000 else v
@@ -187,17 +192,18 @@ def read_bmp280(bus):
 
 # ---------------- MQTT ----------------
 
-BROKER_IP = "192.168.11.115"
-
 DISCOVERY_PREFIX = "homeassistant"
 NODE_ID = "barrbro_sensors_01"
 COMPONENT = "sensor"
 
+
 def config_topic(object_id):
     return f"{DISCOVERY_PREFIX}/{COMPONENT}/{NODE_ID}/{object_id}/config"
 
+
 def state_topic(object_id):
     return f"{DISCOVERY_PREFIX}/{COMPONENT}/{NODE_ID}/{object_id}/state"
+
 
 DISCOVERY = {
     "temperature": {
@@ -226,7 +232,7 @@ def publish_json(client, topic, payload, retain=False):
         print(f"Publish error on {topic}: rc={result.rc}")
 
 
-def main():
+def main(broker_ip, test_only):
     busno = find_i2c_bus()
     if busno is None:
         print("ERROR: CH341 I2C USB bus not found")
@@ -234,15 +240,24 @@ def main():
 
     check_dev_node(busno)
 
-
     with SMBus(busno) as bus:
         aht_temp, aht_hum = read_aht20(bus)
         bmp_temp, bmp_press_pa = read_bmp280(bus)
 
     bmp_press_hpa = bmp_press_pa / 100.0
 
-    client = mqtt.Client()
-    client.connect(BROKER_IP, 1883, keepalive=60)
+    if test_only:
+        print(f"AHT20:")
+        print(f"  Temperature: {aht_temp:.2f} °C")
+        print(f"  Humidity:    {aht_hum:.2f} %RH")
+
+        print(f"BMP280:")
+        print(f"  Temperature: {bmp_temp:.2f} °C")
+        print(f"  Pressure:    {bmp_press_pa / 100:.2f} hPa")
+        return
+
+    client = mqtt.Client(protocol=mqtt.MQTTv311, callback_api_version=2)
+    client.connect(broker_ip, 1883, keepalive=60)
     client.loop_start()
 
     # ---- Discovery ----
@@ -275,5 +290,32 @@ def main():
     client.disconnect()
 
 
+def valid_ip(value):
+    try:
+        ipaddress.ip_address(value)
+        return value
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{value}' is not a valid IP address")
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Barrbro, a barometer MQTT client"
+    )
+    parser.add_argument(
+        "--broker-ip",
+        type=valid_ip,
+        help="IP address of the MQTT broker (required, unless test)."
+    )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Print the measured values from the sensors and then quit"
+    )
+
+    args = parser.parse_args()
+
+    if not args.test and not args.broker_ip:
+        parser.error("--broker-ip is required unless --test is specified")
+
+    main(args.broker_ip, args.test)

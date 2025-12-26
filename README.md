@@ -1,5 +1,7 @@
 ## Barrbro - An USB barometer for Domoticz/HomeAssistant
 
+  ![box](images/box.jpg)
+
 This repo contains source code and instructions for how to get a barometer
 attached to an USB port running, and providing measurements to Domoticz/HomeAssistant
 via MQTT. It does not need to be attached to the computer running Domoticz/HomeAssistant.
